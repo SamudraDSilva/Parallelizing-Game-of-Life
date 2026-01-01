@@ -1,5 +1,6 @@
 import pygame
 import random
+import time
 
 pygame.init()
 
@@ -8,7 +9,7 @@ BLACK = (0,0,0)
 GRAY = (125,125,125)
 YELLOW = (255,255,0)
 
-WIDTH, HEIGHT = 750, 750
+WIDTH, HEIGHT = 400, 400
 TILE_SIZE = 10 
 GRID_WIDTH = WIDTH // TILE_SIZE
 GRID_HEIGHT = HEIGHT // TILE_SIZE
@@ -73,11 +74,16 @@ def get_neighbors(pos):
 
 def main():
     running = True
-    playing = True
+    playing = False
     positions = set()
 
     count = 0
     update_freq = 120
+
+    # Performance measument variables
+    generation_count = 0
+    gps = 0.0
+    last_gps_time = time.time()
 
     while running:
         clock.tick(FPS)
@@ -89,7 +95,19 @@ def main():
             count = 0
             positions = adjust_grid(positions)
 
-        pygame.display.set_caption("Playing" if playing else "Pause" )
+            # Count this for generation for GPS calculation
+            generation_count +=1
+            current_time = time.time()
+
+            if current_time - last_gps_time >= 1.0:
+                gps = generation_count / (current_time - last_gps_time)
+                generation_count = 0
+                last_gps_time = current_time
+                 
+
+        status = "Playing" if playing else "Pause"
+        pop = len(positions)
+        pygame.display.set_caption(f"Conway's Game of Life | GPS: {gps:.1f} | Population: {pop}| {status}")
 
 
         for event in pygame.event.get():
