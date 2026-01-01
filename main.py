@@ -3,12 +3,13 @@ import random
 
 pygame.init()
 
-BLACK = (255,255,255)
+WHITE = (255,255,255)
+BLACK = (0,0,0)
 GRAY = (125,125,125)
 YELLOW = (255,255,0)
 
-WIDTH, HEIGHT = 800, 800
-TILE_SIZE = 20 
+WIDTH, HEIGHT = 750, 750
+TILE_SIZE = 10 
 GRID_WIDTH = WIDTH // TILE_SIZE
 GRID_HEIGHT = HEIGHT // TILE_SIZE
 FPS = 60
@@ -59,10 +60,10 @@ def get_neighbors(pos):
     x, y = pos
     neighbors = []
     for dx in [-1,0,1]:
-        if x + dx < 0 or x + dx > GRID_WIDTH:
+        if x + dx < 0 or x + dx >= GRID_WIDTH:
             continue
         for dy in [-1,0,1]:
-            if y + dy < 0 or y + dy > GRID_HEIGHT:
+            if y + dy < 0 or y + dy >= GRID_HEIGHT:
                 continue
             if dx == 0 and dy == 0:
                 continue
