@@ -1,143 +1,186 @@
 import pygame
 import numpy as np
-import random
+from numba import njit, prange
 import time
+import random
+import psutil  
 
 pygame.init()
 
-WHITE = (255,255,255)
-BLACK = (0,0,0)
-GRAY = (125,125,125)
-YELLOW = (255,255,0)
-
-WIDTH, HEIGHT = 400, 400
-TILE_SIZE = 10 
-GRID_WIDTH = WIDTH // TILE_SIZE
-GRID_HEIGHT = HEIGHT // TILE_SIZE
+# ==================== Display Settings ====================
+WINDOW_WIDTH, WINDOW_HEIGHT = 4000, 400
+CELL_SIZE = 10
+GRID_COLUMNS = WINDOW_WIDTH // CELL_SIZE    
+GRID_ROWS = WINDOW_HEIGHT // CELL_SIZE      
 FPS = 60
 
-screen = pygame.display.set_mode((WIDTH,HEIGHT))
-
+screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
 clock = pygame.time.Clock()
 
-grid = np.zeros((GRID_HEIGHT,GRID_WIDTH),dtype=bool) # Alive = True, Dead = False
+GRAY = (125, 125, 125)
+YELLOW = (255, 255, 0)
+BLACK = (0, 0, 0)
 
-def gen(num):
-    grid[:] = False
-    if num > GRID_WIDTH * GRID_HEIGHT:
-        num = GRID_WIDTH * GRID_HEIGHT
-    indices = random.sample(range(GRID_WIDTH * GRID_HEIGHT), num)
-    grid.flat[indices] = True
+current_generation = np.zeros((GRID_ROWS, GRID_COLUMNS), dtype=np.bool_)
+
+# Parallel Update with Numba 
+@njit(parallel=True)
+def update_parallel(grid):
+    height, width = grid.shape
+    next_gen = np.zeros((height, width), dtype=np.bool_)
+    
+    for row in prange(height):
+        for col in range(width):
+            live_neighbors = 0
+            for dr in [-1, 0, 1]:
+                for dc in [-1, 0, 1]:
+                    if dr == 0 and dc == 0:
+                        continue
+                    nr = row + dr
+                    nc = col + dc
+                    if 0 <= nr < height and 0 <= nc < width:
+                        if grid[nr, nc]:
+                            live_neighbors += 1
+            
+            alive = grid[row, col]
+            next_gen[row, col] = (live_neighbors == 3) or (alive and live_neighbors == 2)
+    
+    return next_gen
+
+# Warm-up Numba compiler
+print("Warming up Numba compiler...")
+update_parallel(current_generation.copy())
+print("Ready!")
+
+# Serial Update 
+def update_serial():
+    global current_generation
+    height, width = current_generation.shape
+    next_gen = np.zeros_like(current_generation)
+    
+    for row in range(height):
+        for col in range(width):
+            live_neighbors = 0
+            for dr in [-1, 0, 1]:
+                for dc in [-1, 0, 1]:
+                    if dr == 0 and dc == 0: continue
+                    nr, nc = row + dr, col + dc
+                    if 0 <= nr < height and 0 <= nc < width:
+                        live_neighbors += current_generation[nr, nc]
+            
+            alive = current_generation[row, col]
+            next_gen[row, col] = (live_neighbors == 3) or (alive and live_neighbors == 2)
+    
+    current_generation[:] = next_gen
+
+# Drawing with Visualizer 
+show_core_colors = False
+current_mode = "serial"  # "serial" or "parallel"
 
 def draw_grid():
-
-    # Draw Live Cells
-    live_rows, live_cols = np.where(grid)
-    for row, col in zip(live_rows,live_cols):
-        top_left = (col * TILE_SIZE, row * TILE_SIZE)
-        pygame.draw.rect(screen,YELLOW,(*top_left,TILE_SIZE,TILE_SIZE))
-
-    for row in range(GRID_HEIGHT):
-        pygame.draw.line(screen,BLACK, (0, row * TILE_SIZE), (WIDTH, row * TILE_SIZE))
+    screen.fill(GRAY)
     
-    for col in range(GRID_WIDTH):
-        pygame.draw.line(screen,BLACK,(col * TILE_SIZE, 0),(col * TILE_SIZE, HEIGHT))
-
-# ------------------- Serial Update Function -------------------
-
-def update_grid_serial():
-    global grid
-    new_grid = np.zeros_like(grid)
-
-    for i in range(GRID_HEIGHT):
-        for j in range(GRID_WIDTH):
-            total = 0
-            for dj in [-1,0,1]:
-                for di in [-1,0,1]:
-                    if dj == 0 and di == 0:
-                        continue
-                    ni , nj = i + di, j + dj
-                    if 0 <= ni < GRID_HEIGHT and 0 <= nj < GRID_WIDTH:
-                        total += grid[ni,nj]
+    live_rows, live_cols = np.where(current_generation)
+    
+    if show_core_colors and current_mode == "parallel":
+        core_colors = [
+            (255,0,0), (0,255,0), (0,0,255), (255,255,0),
+            (255,0,255), (0,255,255), (255,100,0), (100,255,100)
+        ]
+        num_cores_estimate = 8  # Visual only
         
-            if grid[i,j]:
-                if total == 2 or total == 3:
-                    new_grid[i, j] = True
-            else:
-                if total == 3:
-                    new_grid[i, j] = True
+        for r, c in zip(live_rows, live_cols):
+            core_id = r % num_cores_estimate
+            color = core_colors[core_id]
+            pygame.draw.rect(screen, color,
+                             (c * CELL_SIZE, r * CELL_SIZE, CELL_SIZE, CELL_SIZE))
+    else:
+        for r, c in zip(live_rows, live_cols):
+            pygame.draw.rect(screen, YELLOW,
+                             (c * CELL_SIZE, r * CELL_SIZE, CELL_SIZE, CELL_SIZE))
     
-    grid = new_grid
+    # Grid lines
+    for i in range(GRID_ROWS + 1):
+        pygame.draw.line(screen, BLACK, (0, i * CELL_SIZE), (WINDOW_WIDTH, i * CELL_SIZE))
+    for i in range(GRID_COLUMNS + 1):
+        pygame.draw.line(screen, BLACK, (i * CELL_SIZE, 0), (i * CELL_SIZE, WINDOW_HEIGHT))
 
 
 def main():
-    global grid
+    global current_generation, current_mode, show_core_colors
+    
     running = True
-    playing = False
-
-    count = 0
-    update_freq = 30
-
-    # Performance measument variables
-    generation_count = 0
+    simulation_running = False
+    
+    generations_this_second = 0
+    last_time = time.time()
     gps = 0.0
-    last_gps_time = time.time()
+
+    print("Controls:")
+    print("   S → Serial mode")
+    print("   P → Parallel mode (multi-core with Numba)")
+    print("   V → Toggle visualizer (fake core colors)")
+    print("   SPACE → Play / Pause")
+    print("   G → Random pattern")
+    print("   C → Clear")
+    print("   Click → Toggle cell\n")
 
     while running:
         clock.tick(FPS)
-
-        if playing: 
-            count += 1
         
-        if count >= update_freq:
-            count = 0
-            update_grid_serial()
-
-            # Count this for generation for GPS calculation
-            generation_count +=1
-            current_time = time.time()
-
-            if current_time - last_gps_time >= 1.0:
-                gps = generation_count / (current_time - last_gps_time)
-                generation_count = 0
-                last_gps_time = current_time
-                 
-
-        status = "Playing" if playing else "Pause"
-        pop = np.count_nonzero(grid)
-        pygame.display.set_caption(f"Conway's Game of Life | GPS: {gps:.1f} | Population: {pop}| {status}")
-
-
+        if simulation_running:
+            if current_mode == "serial":
+                update_serial()
+            else:
+                current_generation[:] = update_parallel(current_generation)
+            generations_this_second += 1
+        
+        # GPS
+        now = time.time()
+        if now - last_time >= 1.0:
+            gps = generations_this_second / (now - last_time)
+            generations_this_second = 0
+            last_time = now
+        
+        cpu_usage = psutil.cpu_percent(interval=None)
+        live_cells = np.count_nonzero(current_generation)
+        vis_status = "ON" if show_core_colors else "OFF"
+        
+        pygame.display.set_caption(
+            f"Mode: {current_mode.upper()} | GPS: {gps:.0f} | Live: {live_cells} | CPU: {cpu_usage:.0f}% | Vis: {vis_status}"
+        )
+        
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                x, y = pygame.mouse.get_pos()
-                col = x // TILE_SIZE
-                row = y // TILE_SIZE
-                pos = (col,row)
             
-                if 0 <= col < GRID_WIDTH and 0 <= row < GRID_HEIGHT:
-                    grid[row,col] = not grid[row,col]
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                mx, my = pygame.mouse.get_pos()
+                col = mx // CELL_SIZE
+                row = my // CELL_SIZE
+                if 0 <= col < GRID_COLUMNS and 0 <= row < GRID_ROWS:
+                    current_generation[row, col] = not current_generation[row, col]
             
-            if event.type == pygame.KEYDOWN:
-
+            elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
-                    playing = not playing
-
-                if event.key == pygame.K_c:
-                    grid[:] = False
-                    playing = False
-                
-                if event.key == pygame.K_g:
-                    gen(random.randint(300,800))
+                    simulation_running = not simulation_running
+                elif event.key == pygame.K_c:
+                    current_generation[:] = False
+                elif event.key == pygame.K_g:
+                    num = random.randint(2000, 4000)
+                    current_generation[:] = False
+                    indices = random.sample(range(GRID_ROWS * GRID_COLUMNS), num)
+                    current_generation.flat[indices] = True
+                elif event.key == pygame.K_v:
+                    show_core_colors = not show_core_colors
+                elif event.key == pygame.K_s:
+                    current_mode = "serial"
+                elif event.key == pygame.K_p:
+                    current_mode = "parallel"
         
-            
-        screen.fill(GRAY)
         draw_grid()
         pygame.display.update()
-        
+    
     pygame.quit()
 
 if __name__ == "__main__":
