@@ -8,25 +8,24 @@ import os
 
 pygame.init()
 
-# ==================== Display Settings ====================
-WINDOW_WIDTH, WINDOW_HEIGHT = 4000, 400
+WINDOW_WIDTH, WINDOW_HEIGHT = 8000, 400
 CELL_SIZE = 10
-GRID_COLUMNS = WINDOW_WIDTH // CELL_SIZE    # 400
-GRID_ROWS = WINDOW_HEIGHT // CELL_SIZE      # 40
+GRID_COLUMNS = WINDOW_WIDTH // CELL_SIZE    
+GRID_ROWS = WINDOW_HEIGHT // CELL_SIZE      
 FPS = 60
 
 screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
 clock = pygame.time.Clock()
 
-# ==================== Colors ====================
+
 GRAY = (125, 125, 125)
 YELLOW = (255, 255, 0)
 BLACK = (0, 0, 0)
 
-# ==================== Game Grid ====================
+
 current_generation = np.zeros((GRID_ROWS, GRID_COLUMNS), dtype=np.bool_)
 
-# ==================== Parallel Update with Customizable Threads ====================
+# Parallel Update
 @njit(parallel=True)
 def update_parallel(grid):
     height, width = grid.shape
@@ -61,7 +60,7 @@ current_threads = max_threads
 set_num_threads(current_threads)
 print(f"Numba using {current_threads} threads (max: {max_threads})")
 
-# ==================== Serial Update ====================
+# Serial Update 
 def update_serial():
     global current_generation
     height, width = current_generation.shape
@@ -82,7 +81,7 @@ def update_serial():
     
     current_generation[:] = next_gen
 
-# ==================== Drawing with Visualizer ====================
+# Drawing with Visualizer 
 show_core_colors = False
 current_mode = "parallel"  # Start in parallel with full threads
 
@@ -114,7 +113,6 @@ def draw_grid():
     for i in range(GRID_COLUMNS + 1):
         pygame.draw.line(screen, BLACK, (i * CELL_SIZE, 0), (i * CELL_SIZE, WINDOW_HEIGHT))
 
-# ==================== Main Loop ====================
 def main():
     global current_generation, current_mode, show_core_colors
     global current_threads
@@ -181,7 +179,7 @@ def main():
                 elif event.key == pygame.K_c:
                     current_generation[:] = False
                 elif event.key == pygame.K_g:
-                    num = random.randint(6000, 8000)
+                    num = random.randint(4000, 6000)
                     current_generation[:] = False
                     indices = random.sample(range(GRID_ROWS * GRID_COLUMNS), num)
                     current_generation.flat[indices] = True
